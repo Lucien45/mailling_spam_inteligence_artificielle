@@ -1,16 +1,18 @@
-import joblib
-import re
-import pandas as pd
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib import messages
+from django.contrib.auth import login, logout
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import permissions, status, viewsets
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.model_selection import train_test_split
-
-from chat.models import *
+import joblib
+import re
+import pandas as pd
+from .models import *
+from .serializers import *
 
 # Charger le modèle et le vectoriseur
 MODEL_PATH = r'sample_data/logistic_regression_model.joblib'
@@ -20,49 +22,70 @@ loaded_vectorizer_rf = joblib.load(VECTORIZER_PATH)
 
 # Fonction pour nettoyer le texte
 def clean_text(text):
-    # Supprimer les caractères spéciaux, les chiffres, et convertir en minuscules
     text = re.sub(r'[^a-zA-Z\s]', '', str(text))
     return text.lower()
 
-def create_account(request):
-    if request.method == 'POST':
-        username = request.POST['username']
-        email = request.POST['email']
-        if not Gmail_compte.objects.filter(email=email).exists():
-            Gmail_compte.objects.create(username=username, email=email, date_cration=timezone.now())
-            messages.success(request, 'Compte créé avec succès.')
-            return redirect('login')
-        else:
-            messages.error(request, 'compte Email existe déjà.')
-    return render(request, 'create_accounts.html')
+class GmailCompteViewSet(viewsets.ModelViewSet):
+    queryset = Gmail_compte.objects.all()
+    serializer_class = GmailCompteSerializer
 
+class GmailMessageViewSet(viewsets.ModelViewSet):
+    queryset = Gmail_Message.objects.all()
+    serializer_class = GmailMessageSerializer
 
-def login(request):
-    error = None
-    if request.method == 'POST':
-        email = request.POST['email']
+class RecevoirMessageViewSet(viewsets.ModelViewSet):
+    queryset = Recevoir_Message.objects.all()
+    serializer_class = RecevoirMessageSerializer
+
+class EnvoyerMessageViewSet(viewsets.ModelViewSet):
+    queryset = Envoyer_Message.objects.all()
+    serializer_class = EnvoyerMessageSerializer
+
+class CreateAccount(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = GmailCompteSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(date_cration=timezone.now())
+            return Response({'message': 'Compte créé avec succès.'}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class Login(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             user = Gmail_compte.objects.get(email=email)
             request.session['user_id'] = user.id
-            return redirect('inbox')
+            return Response({'message': 'Login successful'}, status=status.HTTP_200_OK)
         except Gmail_compte.DoesNotExist:
-            error = 'compte email n\'existe pas.'
-    return render(request, 'login.html', {'error': error})
+            return Response({'error': 'Compte email n\'existe pas.'}, status=status.HTTP_404_NOT_FOUND)
 
-def inbox(request):
-    # Récupérer l'identifiant utilisateur de la session
-    user_id = request.session.get('user_id')
-    
-    if user_id is None:
-        return redirect('login')
+class Inbox(APIView):
+    permission_classes = [permissions.AllowAny]
 
-    # Récupérer l'utilisateur de la base de données à l'aide de l'user_id
-    user = Gmail_compte.objects.get(id=user_id)
-    received_messages = Recevoir_Message.objects.filter(user=user)
-    
-    if request.method == 'POST':
-        selected_messages = request.POST.getlist('selected_messages')
-        categorie = request.POST.get('categorie')
+    def get(self, request):
+        user_id = request.session.get('user_id')
+        if user_id is None:
+            return Response({'error': 'User not logged in'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user = Gmail_compte.objects.get(id=user_id)
+        received_messages = Recevoir_Message.objects.filter(user=user)
+        serializer = RecevoirMessageSerializer(received_messages, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        user_id = request.session.get('user_id')
+        if user_id is None:
+            return Response({'error': 'User not logged in'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        selected_messages = request.data.get('selected_messages', [])
+        categorie = request.data.get('categorie')
         categorie_gmail = get_object_or_404(Categorie_Gmail, Contenu=categorie)
 
         for message_id in selected_messages:
@@ -70,34 +93,24 @@ def inbox(request):
             message.categorie = categorie_gmail
             message.save()
 
-        messages.success(request, f'Messages marqués comme {categorie}.')
-        return redirect('inbox')
+        return Response({'message': f'Messages marked as {categorie}.'}, status=status.HTTP_200_OK)
 
-    context = {
-        'user': user,
-        'received_messages': received_messages,
-        'categories': Categorie_Gmail.objects.all(),
-    }
-    
-    return render(request, 'inbox.html', context)
+class SendEmail(APIView):
+    permission_classes = [permissions.AllowAny]
 
-def send_email(request):
-    user_id = request.session.get('user_id')
-    if user_id is None:
-        return redirect('login')
+    def post(self, request):
+        user_id = request.session.get('user_id')
+        if user_id is None:
+            return Response({'error': 'User not logged in'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    user = Gmail_compte.objects.get(id=user_id)
+        user = Gmail_compte.objects.get(id=user_id)
+        recipient_email = request.data.get('recipient')
+        content = request.data.get('content')
 
-    if request.method == 'POST':
-        recipient_email = request.POST['recipient']
-        content = request.POST['content']
-
-        # Nettoyer le contenu et prédire la catégorie
         cleaned_content = clean_text(content)
         message_tfidf = loaded_vectorizer_rf.transform([cleaned_content])
         prediction = loaded_model_rf.predict(message_tfidf)[0]
 
-        # Déterminer la catégorie (en supposant que « ham » et « spam » sont les deux catégories)
         categorie = Categorie_Gmail.objects.get_or_create(Contenu=prediction)[0]
 
         try:
@@ -105,123 +118,77 @@ def send_email(request):
             message = Gmail_Message.objects.create(Contenu=content, date=timezone.now(), categorie=categorie)
             Envoyer_Message.objects.create(user=user, message=message)
             Recevoir_Message.objects.create(user=recipient, message=message)
-            messages.success(request, 'Email sent successfully.')
+            return Response({'message': 'Email sent successfully.'}, status=status.HTTP_201_CREATED)
         except Gmail_compte.DoesNotExist:
-            messages.error(request, 'Recipient not found.')
+            return Response({'error': 'Recipient not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-    return redirect('inbox')
+class Logout(APIView):
+    permission_classes = [permissions.AllowAny]
 
-def logout_view(request):
-    # Effacer les données de session
-    request.session.flush()
-    # Redirection vers la page de connexion
-    messages.info(request, 'Vous avez été déconnecté avec succès.')
-    return redirect('login')
+    def post(self, request):
+        request.session.flush()
+        return Response({'message': 'Vous avez été déconnecté avec succès.'}, status=status.HTTP_200_OK)
 
-# Rentrainement du modele avec la nouvelle donnees du Gmail_Message
-def retrain_modele(request):
-    # Charger les données du modèle Gmail_Message
-    messages_data = Gmail_Message.objects.all().values('Contenu', 'categorie')
+class RetrainModel(APIView):
+    permission_classes = [permissions.AllowAny]
 
-    # Convertir en DataFrame
-    df = pd.DataFrame(list(messages_data))
+    def post(self, request):
+        original_data = pd.read_csv('sample_data/email_traduit.csv')
+        original_data['Message Traduit'] = original_data['Message Traduit'].apply(clean_text)
+        original_data.dropna(subset=['Category', 'Message Traduit'], inplace=True)
 
-    # Diviser les données en ensembles d'entraînement et de test
-    X_train, X_test, y_train, y_test = train_test_split(
-        df['Contenu'], df['categorie'], test_size=0.2, random_state=42
-    )
+        df_original = original_data[['Category', 'Message Traduit']]
 
-    # TF-IDF Vectorization
-    vectorizer = TfidfVectorizer()
-    X_train_vec = vectorizer.fit_transform(X_train)
-    X_test_vec = vectorizer.transform(X_test)
+        messages_data = Gmail_Message.objects.all().values('Contenu', 'categorie')
+        df_gmail = pd.DataFrame(list(messages_data))
+        df_gmail.dropna(subset=['categorie', 'Contenu'], inplace=True)
 
-    # Entraînement du modèle RandomForestClassifier
-    clf_rf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf_rf.fit(X_train_vec, y_train)
+        combined_df = pd.concat([
+            df_gmail.rename(columns={'categorie': 'Category', 'Contenu': 'Message Traduit'}),
+            df_original
+        ], ignore_index=True)
 
-    # Test du modèle
-    y_pred_rf = clf_rf.predict(X_test_vec)
+        combined_df['Category'] = combined_df['Category'].astype(str)
+        combined_df['Message Traduit'] = combined_df['Message Traduit'].astype(str)
+        combined_df.dropna(subset=['Category', 'Message Traduit'], inplace=True)
 
-    # Évaluation des performances du modèle
-    accuracy = accuracy_score(y_test, y_pred_rf)
-    print("Accuracy (RandomForest):", accuracy)
-    print("Classification Report (RandomForest):\n", classification_report(y_test, y_pred_rf))
+        X_train, X_test, y_train, y_test = train_test_split(
+            combined_df['Message Traduit'], combined_df['Category'], test_size=0.2, random_state=42
+        )
 
-    # Sauvegarde du modèle entraîné avec joblib
-    joblib.dump(clf_rf, r'sample_data/logistic_regression_model.joblib')
-    joblib.dump(vectorizer, r'sample_data/tfidf_vectorizer_regretion.joblib')
+        vectorizer = TfidfVectorizer()
+        X_train_vec = vectorizer.fit_transform(X_train)
+        X_test_vec = vectorizer.transform(X_test)
 
-    print("Modèle RandomForest et vectorizer sauvegardés.")
+        clf_lr = LogisticRegression(random_state=42)
+        clf_lr.fit(X_train_vec, y_train)
 
-    # Display success message
-    messages.success(request, f'Modèle réentraîné avec succès. Précision: {accuracy:.2f}')
+        y_pred_lr = clf_lr.predict(X_test_vec)
+        accuracy = accuracy_score(y_test, y_pred_lr)
+        print("Accuracy (Logistic Regression):", accuracy)
+        print("Classification Report (Logistic Regression):\n", classification_report(y_test, y_pred_lr))
 
-    # Redirect back to inbox or desired page
-    return redirect('inbox')
+        joblib.dump(clf_lr, r'sample_data/logistic_regression_model.joblib')
+        joblib.dump(vectorizer, r'sample_data/tfidf_vectorizer_regretion.joblib')
 
-# Rentrainement du modele avec la nouvelle donnees du Gmail_Message et l'encien email_traduit.csv
-def retrain_model(request):
-    # Étape 1: Charger les données originales depuis email_traduit.csv
-    original_data = pd.read_csv('sample_data/email_traduit.csv')
-    
-    # Nettoyage du texte
-    original_data['Message Traduit'] = original_data['Message Traduit'].apply(clean_text)
-    
-    # Vérification des valeurs manquantes
-    original_data.dropna(subset=['Category', 'Message Traduit'], inplace=True)
+        return Response({'message': f'Modèle réentraîné avec succès. Précision: {accuracy:.2f}'}, status=status.HTTP_200_OK)
 
-    # Sélectionner les colonnes d'intérêt
-    df_original = original_data[['Category', 'Message Traduit']]
+class UserInfo(APIView):
+    permission_classes = [permissions.AllowAny]
 
-    # Étape 2: Charger les données du modèle Gmail_Message
-    messages_data = Gmail_Message.objects.all().values('Contenu', 'categorie')
-    df_gmail = pd.DataFrame(list(messages_data))
-    
-    # Vérification des valeurs manquantes
-    df_gmail.dropna(subset=['categorie', 'Contenu'], inplace=True)
+    def get(self, request):
+        user_id = request.session.get('user_id')
+        if user_id is None:
+            return Response({'error': 'User not logged in'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # Combine the data
-    combined_df = pd.concat([
-        df_gmail.rename(columns={'categorie': 'Category', 'Contenu': 'Message Traduit'}),
-        df_original
-    ], ignore_index=True)
+        user = get_object_or_404(Gmail_compte, id=user_id)
+        serializer = GmailCompteSerializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # Convert 'Category' and 'Message Traduit' to strings to ensure consistency
-    combined_df['Category'] = combined_df['Category'].astype(str)
-    combined_df['Message Traduit'] = combined_df['Message Traduit'].astype(str)
+class FetchCategories(APIView):
+    permission_classes = [permissions.AllowAny]
 
-    # Vérification des valeurs manquantes dans le dataframe combiné
-    combined_df.dropna(subset=['Category', 'Message Traduit'], inplace=True)
-
-    # Étape 3: Diviser les données en ensembles d'entraînement et de test
-    X_train, X_test, y_train, y_test = train_test_split(
-        combined_df['Message Traduit'], combined_df['Category'], test_size=0.2, random_state=42
-    )
-
-    # Étape 4: TF-IDF Vectorization
-    vectorizer = TfidfVectorizer()
-    X_train_vec = vectorizer.fit_transform(X_train)
-    X_test_vec = vectorizer.transform(X_test)
-
-    # Étape 5: Entraînement du modèle LogisticRegression
-    clf_lr = LogisticRegression(random_state=42)
-    clf_lr.fit(X_train_vec, y_train)
-
-    # Étape 6: Test du modèle et Évaluation de sa performance
-    y_pred_lr = clf_lr.predict(X_test_vec)
-    accuracy = accuracy_score(y_test, y_pred_lr)
-    print("Accuracy (Logistic Regression):", accuracy)
-    print("Classification Report (Logistic Regression):\n", classification_report(y_test, y_pred_lr))
-
-    # Étape 7: Sauvegarde du modèle entraîné avec joblib
-    joblib.dump(clf_lr, r'sample_data/logistic_regression_model.joblib')
-    joblib.dump(vectorizer, r'sample_data/tfidf_vectorizer_regretion.joblib')
-
-    print("Logistic Regression model and vectorizer saved.")
-
-    # Display success message
-    messages.success(request, f'Modèle réentraîné avec succès. Précision: {accuracy:.2f}')
-
-    # Redirect back to inbox or desired page
-    return redirect('inbox')
+    def get(self, request):
+        categories = Categorie_Gmail.objects.all()
+        serializer = CategorieGmailSerializer(categories, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
