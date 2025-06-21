@@ -1,0 +1,93 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django
+*.sqlite3
+db.sqlite3
+*.pyc
+media/
+staticfiles/
+static_root/
+local_settings.py
+instance/
+.venv/
+venv/
+ENV/
+env/
+*.pot
+*.mo
+
+# Django migration files (optional: keep if you want to track them)
+**/migrations/*.pyc
+**/migrations/__pycache__/
+**/migrations/*.py~
+
+# Mac/Linux
+*.swp
+*~
+
+# VSCode + Python-specific
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+
+# Coverage reports
+htmlcov/
+coverage.xml
+.coverage
+.coverage.*
+
+# Pytest
+.pytest_cache/
+.tox/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Gunicorn
+gunicorn.pid
+
+# Other system files
+Thumbs.db
+ehthumbs.db
+
