@@ -1,0 +1,5 @@
+titre,contenu,couverture,status,auteur_id,categorie_id,description,featured,reading_time
+Introduction to React JS,media/livre/files-1742907276342-946025575.pdf,media/couverture/files-1742907276383-731021173.jpg,publié,1,2,Introduction de base avec le bibliothèque de JavaScript  React JS,f,0
+Optimising performance in React  apps,media/livre/files-1742986178332-214378570.pdf,media/couverture/files-1742986178351-101123902.jpg,publié,1,2,App performance is a critical aspect of app development,t,80
+TypeScript,media/livre/files-1743322924096-888898376.pdf,media/couverture/files-1743322924223-308064657.jpeg,brouillon,1,2,TypeScript Notions fondamentales,f,0
+The Future of AI,media/livre/files-1743513586855-2096376.pdf,media/couverture/files-1743513586863-292045401.jpeg,publié,3,1,A deep dive into artificial intelligence,t,120
